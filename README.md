@@ -31,10 +31,17 @@ it runs like an app, including offline.
   devices. Copies are merged item by item (newest edit wins, deletions
   stick), so two phones can be used at once.
 - **Privacy:** the app asks Google only for `drive.file` - access to the
-  files it created itself. It cannot see, change or delete anything else in
-  your Drive. Any of your devices signed in to the same Google account see
-  the same list. (Sharing the list with *another person's* account doesn't
-  work with this permission.)
+  files it created itself, or that you pick in Google's file picker. It
+  cannot see, change or delete anything else in your Drive.
+- **Sharing with someone else:** Settings → Sharing → enter their Google
+  email → **Share**. Google emails them. They open Stock List, sign in, tap
+  **Open a list shared with me**, tick **both** `stock-list-data.json` and
+  `stock-list-photos.json`, and press **Select** (once per Google account).
+  To stop sharing, remove them from the **Stock List** folder in Drive.
+- **Photos when shared:** each person's app can only open the full-size
+  photos it uploaded itself, so a small copy (400 px) of every photo goes in
+  the shared `stock-list-photos.json`. Everyone sees everyone's photos at
+  that size; your own photos stay full size for you.
 - Google sign-ins last an hour; the app renews them by itself when opened.
 - **Use on this device only** skips Google entirely (nothing is backed up).
 
@@ -51,7 +58,13 @@ it runs like an app, including offline.
    - **Data access**: the scope `https://www.googleapis.com/auth/drive.file`
      only (not `.../auth/drive`).
    - **Audience → Test users**: the Gmail of everyone who'll sign in.
-   - **APIs & Services → Library**: Google Drive API enabled.
+   - **APIs & Services → Library**: Google Drive API and **Google Picker API**
+     enabled.
+   - **APIs & Services → Credentials → Create credentials → API key** (for
+     sharing): restrict it to *Websites* `https://pluck1983-source.github.io/*`
+     and to the *Google Picker API*, then put it in `.env` as
+     `VITE_GOOGLE_API_KEY`. Everyone who opens a shared list must be a test
+     user (or the app published).
 
 
 `drive.file` is a non-sensitive scope, so Google doesn't treat the app as

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { decideSync, hashState } from './syncEngine';
-import { emptyState, locationsByUse, matchesSearch, mergeStock, parseState, sortBuyList, stockCsv, type BuyItem, type StockItem, type StockState } from './store';
+import { emptyState, locationsByUse, parsePack, matchesSearch, mergeStock, parseState, sortBuyList, stockCsv, type BuyItem, type StockItem, type StockState } from './store';
 
 const item = (id: string, updatedAt: string, patch: Partial<StockItem> = {}): StockItem => ({
   id, name: id, qty: 1, location: '', photoId: null, notes: '', createdAt: '2026-01-01', updatedAt, ...patch,
@@ -71,4 +71,12 @@ describe('decideSync', () => {
   it('pushes local edits', () => expect(decideSync({ ...base, localHash: 'h2' })).toBe('push'));
   it('merges when another device uploaded', () => expect(decideSync({ ...base, remoteVersion: 'v2' })).toBe('merge'));
   it('pushes when there is no cloud copy yet', () => expect(decideSync({ ...base, remoteVersion: null })).toBe('push'));
+});
+
+describe('parsePack', () => {
+  it('keeps image data URLs and skips anything else', () => {
+    const text = JSON.stringify({ version: 1, photos: { a: 'data:image/jpeg;base64,AAA', b: 'http://evil', c: 5 } });
+    expect(parsePack(text)).toEqual({ a: 'data:image/jpeg;base64,AAA' });
+  });
+  it('treats a broken file as empty', () => expect(parsePack('not json')).toEqual({}));
 });

@@ -2,19 +2,27 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { createGoogleDriveProvider } from './drive';
 import { decideSync, hashState } from './syncEngine';
 import { AuthRequiredError, type RemoteFileMeta } from './driveTypes';
-import { getPhoto, markPhotoSynced, setRemotePhotoFetcher, unsyncedPhotoIds } from './photos';
-import { mergeStock, parseState, type StockState } from './store';
+import { blobToDataUrl, dataUrlToBlob, ensureThumb, getPhoto, getThumb, markPhotoSynced, saveThumb, setRemotePhotoFetcher, unsyncedPhotoIds } from './photos';
+import { pickSharedFiles, pickerAvailable } from './picker';
+import { mergeStock, parsePack, parseState, type StockState } from './store';
+
+const DATA_FILE = 'stock-list-data.json';
+const PACK_FILE = 'stock-list-photos.json';
 
 const drive = createGoogleDriveProvider({
   appName: 'Stock List',
-  fileName: 'stock-list-data.json',
+  fileName: DATA_FILE,
+  packName: PACK_FILE,
   folderName: 'Stock List',
   keyPrefix: 'stocklist-gdrive',
   redirectPath: '',
 });
 const provider = drive.provider;
+const extras = drive.extras;
+export { pickerAvailable };
 
-export type SyncStatus = 'unconfigured' | 'off' | 'syncing' | 'synced' | 'reconnect' | 'error';
+/** 'choose': signed in, but this account has no list yet - start one or open one shared with it */
+export type SyncStatus = 'unconfigured' | 'off' | 'choose' | 'syncing' | 'synced' | 'reconnect' | 'error';
 
 interface SyncMeta {
   syncedHash: string | null;
@@ -22,6 +30,13 @@ interface SyncMeta {
   lastSyncedAt: string | null;
   accountEmail: string | null;
   purgedPhotoIds: string[];
+  /** Set by "Start a new list", so the first sync may create the Drive files */
+  allowCreate?: boolean;
+  /** True when this account owns the list (it can share it and create the photo pack) */
+  isOwner?: boolean;
+  /** The photo pack version this device last read or wrote, and the photo ids in it */
+  packVersion?: string | null;
+  packIds?: string[];
 }
 
 const META_KEY = 'stocklist-sync-v1';
@@ -51,6 +66,9 @@ export function useSync(state: StockState, setState: (fn: (current: StockState) 
   const [lastSyncedAt, setLastSyncedAt] = useState(() => readMeta()?.lastSyncedAt ?? null);
   const [pendingPhotos, setPendingPhotos] = useState(0);
   const [error, setError] = useState<string | null>(() => drive.takeSignInError());
+  const [isOwner, setIsOwner] = useState(() => readMeta()?.isOwner ?? true);
+  /** Shared with this account, but the photo pack wasn't picked, so others' photos can't show */
+  const [packMissing, setPackMissing] = useState(false);
 
   const stateRef = useRef(state);
   stateRef.current = state;
@@ -88,6 +106,45 @@ export function useSync(state: StockState, setState: (fn: (current: StockState) 
     }
   }, []);
 
+  /**
+   * The photo pack: one JSON file of small copies of every photo, so everyone
+   * the list is shared with sees each other's photos (each person's app can
+   * only open the full-size photo files it uploaded itself).
+   */
+  const syncPack = useCallback(async (state: StockState, owner: boolean) => {
+    const inUse = new Set(state.items.map((i) => i.photoId).filter((id): id is string => id !== null));
+    const remote = await extras.getPackMeta();
+    let remotePack: Record<string, string> | null = null;
+    if (remote && remote.version !== readMeta()?.packVersion) {
+      remotePack = parsePack(await extras.downloadText(remote));
+      for (const [id, dataUrl] of Object.entries(remotePack)) {
+        if (inUse.has(id) && !(await getThumb(id).catch(() => null))) await saveThumb(id, dataUrlToBlob(dataUrl));
+      }
+      updateMeta({ packVersion: remote.version, packIds: Object.keys(remotePack) });
+    }
+    if (!remote && !owner) {
+      setPackMissing(inUse.size > 0);
+      return;
+    }
+    setPackMissing(false);
+    const packIds = new Set(readMeta()?.packIds ?? []);
+    const toAdd: string[] = [];
+    for (const id of inUse) if (!packIds.has(id) && (await ensureThumb(id).catch(() => null))) toAdd.push(id);
+    // Only photos someone removed or replaced leave the pack, so a photo added
+    // on another device a moment ago is never dropped by a device that hasn't seen its item yet.
+    const toRemove = state.deletedPhotoIds.filter((id) => packIds.has(id) && !inUse.has(id));
+    if (remote && toAdd.length === 0 && toRemove.length === 0) return;
+    // Start from the newest copy in Drive, so additions made elsewhere are kept.
+    const pack = remote ? (remotePack ?? parsePack(await extras.downloadText(remote))) : {};
+    for (const id of toRemove) delete pack[id];
+    for (const id of toAdd) {
+      const thumb = await getThumb(id);
+      if (thumb) pack[id] = await blobToDataUrl(thumb);
+    }
+    const uploaded = await extras.uploadPack(JSON.stringify({ version: 1, photos: pack }), remote);
+    updateMeta({ packVersion: uploaded.version, packIds: Object.keys(pack) });
+  }, []);
+
   const sync = useCallback(
     async (onStart = false) => {
       const meta = readMeta();
@@ -111,19 +168,18 @@ export function useSync(state: StockState, setState: (fn: (current: StockState) 
         if (!remote) {
           if (meta.syncedRemoteVersion !== null)
             throw new Error("Can't find the Stock List data in Google Drive any more - it may have been moved to the bin. Changes are kept on this device.");
-          const who = email ?? 'this Google account';
-          const ok = window.confirm(
-            `No Stock List data was found in ${who}'s Google Drive.\n\nOK - start a new "Stock List" folder there.\nCancel - don't (e.g. you meant to sign in with a different Google account).`,
-          );
-          if (!ok) {
-            writeMeta(null);
-            setAccountEmail(null);
-            setError(`Nothing was created. Sign in again with the Google account that has your Stock List.`);
-            setStatus('off');
+          if (!meta.allowCreate) {
+            setStatus('choose');
             return;
           }
         }
+        const isOwner = remote ? Boolean(remote.owner && email && remote.owner.toLowerCase() === email.toLowerCase()) : true;
+        if (isOwner !== meta.isOwner) {
+          updateMeta({ isOwner });
+          setIsOwner(isOwner);
+        }
         const local = stateRef.current;
+        let latest = local;
         const action = decideSync({
           localHash: hashState(local),
           remoteVersion: remote?.version ?? null,
@@ -141,8 +197,10 @@ export function useSync(state: StockState, setState: (fn: (current: StockState) 
           else recordSynced(mergedHash, remote);
           // Anything edited while that ran is newer - merge it in rather than overwrite it.
           if (mergedHash !== hashState(stateRef.current)) setState((current) => (current === before ? merged : mergeStock(current, merged)));
+          latest = merged;
         }
         await syncPhotos();
+        await syncPack(latest, isOwner);
         authLapsed.current = false;
         setError(null);
         setStatus('synced');
@@ -169,7 +227,7 @@ export function useSync(state: StockState, setState: (fn: (current: StockState) 
         }
       }
     },
-    [recordSynced, setState, syncPhotos],
+    [recordSynced, setState, syncPhotos, syncPack],
   );
 
   const connect = useCallback(async () => {
@@ -183,6 +241,46 @@ export function useSync(state: StockState, setState: (fn: (current: StockState) 
       setStatus('error');
     }
   }, []);
+
+  /** "Start a new list" on the choose screen */
+  const startNew = useCallback(() => {
+    updateMeta({ allowCreate: true });
+    void sync();
+  }, [sync]);
+
+  /** Opens Google's picker so this account can use a list someone shared with it */
+  const openShared = useCallback(async () => {
+    const token = extras.accessToken();
+    if (!token) {
+      setError('Your Google sign-in has run out - tap Reconnect first.');
+      return;
+    }
+    try {
+      const picked = await pickSharedFiles(token, 'stock-list');
+      if (picked.length === 0) return;
+      const names = picked.map((p) => p.name);
+      if (!names.includes(DATA_FILE)) {
+        setError(`Pick the file called ${DATA_FILE} (and ${PACK_FILE} for the photos). Try again.`);
+        return;
+      }
+      setError(null);
+      updateMeta({ packVersion: null, packIds: [] });
+      await sync();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, [sync]);
+
+  /** Shares the list (folder, data and photo pack) with another Google account, as Editor */
+  const share = useCallback(async (email: string) => {
+    // The pack must exist before sharing, or the other person could never open it.
+    if (!(await extras.getPackMeta())) {
+      const created = await extras.uploadPack(JSON.stringify({ version: 1, photos: {} }), null);
+      updateMeta({ packVersion: created.version, packIds: [] });
+    }
+    await extras.shareWith(email.trim());
+    void sync();
+  }, [sync]);
 
   const disconnect = useCallback(async () => {
     await provider.signOut();
@@ -225,5 +323,5 @@ export function useSync(state: StockState, setState: (fn: (current: StockState) 
     };
   }, [sync]);
 
-  return { status, accountEmail, lastSyncedAt, pendingPhotos, error, connect, disconnect, syncNow: sync };
+  return { status, accountEmail, lastSyncedAt, pendingPhotos, error, isOwner, packMissing, connect, disconnect, startNew, openShared, share, syncNow: sync };
 }

@@ -50,7 +50,7 @@ export async function getPhoto(id: string): Promise<Blob | null> {
 }
 
 export async function unsyncedPhotoIds(): Promise<string[]> {
-  return ((await tx('readonly', (s) => s.getAll())) as PhotoRecord[]).filter((r) => !r.synced).map((r) => r.id);
+  return ((await tx('readonly', (s) => s.getAll())) as PhotoRecord[]).filter((r) => !r.synced && !r.id.startsWith('t:')).map((r) => r.id);
 }
 
 export async function markPhotoSynced(id: string) {
@@ -60,9 +60,11 @@ export async function markPhotoSynced(id: string) {
 
 export async function deleteLocalPhoto(id: string) {
   await tx('readwrite', (s) => s.delete(id));
-  const url = urls.get(id);
-  if (url) URL.revokeObjectURL(url);
-  urls.delete(id);
+  for (const key of [`thumb:${id}`, `full:${id}`]) {
+    const url = urls.get(key);
+    if (url) URL.revokeObjectURL(url);
+    urls.delete(key);
+  }
 }
 
 export async function clearAllPhotos() {
@@ -71,24 +73,96 @@ export async function clearAllPhotos() {
   urls.clear();
 }
 
-/** Object URL to show a photo, fetched from Drive if it was taken on another device. */
-export function photoUrl(id: string): Promise<string | null> {
-  const cached = urls.get(id);
+// --- Small copies for the shared photo pack ----------------------------------
+
+/** Pack copies are stored beside full photos under this prefix */
+const THUMB_PREFIX = 't:';
+/** Longest edge of a pack copy: sharp on a phone screen, ~20-40 KB */
+export const THUMB_EDGE = 400;
+
+export async function saveThumb(id: string, blob: Blob) {
+  await savePhoto(THUMB_PREFIX + id, blob, true);
+  for (const key of [`thumb:${id}`, `full:${id}`]) urls.delete(key);
+  notify(id);
+}
+
+export function getThumb(id: string): Promise<Blob | null> {
+  return getPhoto(THUMB_PREFIX + id);
+}
+
+export async function deleteThumb(id: string) {
+  await deleteLocalPhoto(THUMB_PREFIX + id);
+}
+
+export function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+}
+
+export function dataUrlToBlob(dataUrl: string): Blob {
+  const [head, body] = dataUrl.split(',', 2);
+  const type = /data:([^;]+)/.exec(head)?.[1] ?? 'image/jpeg';
+  const bytes = Uint8Array.from(atob(body ?? ''), (c) => c.charCodeAt(0));
+  return new Blob([bytes], { type });
+}
+
+/** A pack copy from this device's full photo, made if missing. Null if neither is here. */
+export async function ensureThumb(id: string): Promise<Blob | null> {
+  const existing = await getThumb(id).catch(() => null);
+  if (existing) return existing;
+  const full = await getPhoto(id).catch(() => null);
+  if (!full) return null;
+  const thumb = await compressImage(full, THUMB_EDGE, 0.6);
+  await saveThumb(id, thumb);
+  return thumb;
+}
+
+// --- Display ------------------------------------------------------------------
+
+const listeners = new Set<(id: string) => void>();
+function notify(id: string) {
+  for (const l of listeners) l(id);
+}
+/** Called when a photo's pack copy arrives, so a placeholder can show it */
+export function onPhotoChanged(listener: (id: string) => void): () => void {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
+/**
+ * Object URL to show a photo. 'thumb' (lists) prefers the small pack copy;
+ * 'full' (the editor) prefers the full photo - from this device, then Drive -
+ * and falls back to the pack copy when the full one isn't reachable (it was
+ * taken by someone the list is shared with).
+ */
+export function photoUrl(id: string, variant: 'thumb' | 'full' = 'full'): Promise<string | null> {
+  const key = `${variant}:${id}`;
+  const cached = urls.get(key);
   if (cached) return Promise.resolve(cached);
-  const pending = inFlight.get(id);
+  const pending = inFlight.get(key);
   if (pending) return pending;
   const promise = (async () => {
-    let blob = await getPhoto(id).catch(() => null);
-    if (!blob && remoteFetcher) {
-      blob = await remoteFetcher(id).catch(() => null);
+    const local = () => getPhoto(id).catch(() => null);
+    const thumb = () => getThumb(id).catch(() => null);
+    const remote = async () => {
+      if (!remoteFetcher) return null;
+      const blob = await remoteFetcher(id).catch(() => null);
       if (blob) await savePhoto(id, blob, true).catch(() => {});
-    }
+      return blob;
+    };
+    const order = variant === 'thumb' ? [thumb, local, remote] : [local, remote, thumb];
+    let blob: Blob | null = null;
+    for (const source of order) if ((blob = await source())) break;
     if (!blob) return null;
     const url = URL.createObjectURL(blob);
-    urls.set(id, url);
+    urls.set(key, url);
     return url;
-  })().finally(() => inFlight.delete(id));
-  inFlight.set(id, promise);
+  })().finally(() => inFlight.delete(key));
+  inFlight.set(key, promise);
   return promise;
 }
 
@@ -96,7 +170,7 @@ export function photoUrl(id: string): Promise<string | null> {
 const MAX_EDGE = 1200;
 
 /** Shrinks a camera photo to a JPEG no bigger than MAX_EDGE on its longest side. */
-export async function compressImage(file: Blob, maxEdge = MAX_EDGE): Promise<Blob> {
+export async function compressImage(file: Blob, maxEdge = MAX_EDGE, quality = 0.72): Promise<Blob> {
   // 'from-image' applies the rotation phones store photos with.
   const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
   const scale = Math.min(1, maxEdge / Math.max(bitmap.width, bitmap.height));
@@ -107,5 +181,5 @@ export async function compressImage(file: Blob, maxEdge = MAX_EDGE): Promise<Blo
   if (!ctx) throw new Error('Could not process the photo on this device');
   ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
   bitmap.close();
-  return new Promise((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Could not compress the photo'))), 'image/jpeg', 0.72));
+  return new Promise((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Could not compress the photo'))), 'image/jpeg', quality));
 }

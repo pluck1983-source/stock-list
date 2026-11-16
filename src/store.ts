@@ -112,6 +112,18 @@ export function stockCsv(items: StockItem[]): string {
   return rows.map((r) => r.map(csvCell).join(',')).join('\n');
 }
 
+/** Reads the shared photo pack file: photo id → small JPEG as a data URL. Bad entries are skipped. */
+export function parsePack(text: string): Record<string, string> {
+  try {
+    const raw = JSON.parse(text) as { photos?: Record<string, unknown> };
+    const out: Record<string, string> = {};
+    for (const [id, value] of Object.entries(raw?.photos ?? {})) if (typeof value === 'string' && value.startsWith('data:image/')) out[id] = value;
+    return out;
+  } catch {
+    return {};
+  }
+}
+
 // --- Device copy ------------------------------------------------------------
 
 const STATE_KEY = 'stocklist-data-v1';

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { clearAllPhotos, compressImage, deleteLocalPhoto, photoUrl, savePhoto } from './photos';
+import { clearAllPhotos, compressImage, deleteLocalPhoto, ensureThumb, onPhotoChanged, photoUrl, savePhoto } from './photos';
 import {
   clearLocal,
   emptyState,
@@ -15,7 +15,7 @@ import {
   type StockItem,
   type StockState,
 } from './store';
-import { useSync, type SyncStatus } from './useSync';
+import { pickerAvailable, useSync, type SyncStatus } from './useSync';
 
 const LOCAL_ONLY_KEY = 'stocklist-local-only';
 type Tab = 'stock' | 'buy';
@@ -105,6 +105,9 @@ export default function App() {
       />
     );
 
+  if (sync.status === 'choose')
+    return <ChooseList email={sync.accountEmail} error={sync.error} onNew={sync.startNew} onShared={() => void sync.openShared()} onSignOut={() => void sync.disconnect()} />;
+
   return (
     <div className="mx-auto flex min-h-dvh max-w-2xl flex-col pb-[calc(5rem+env(safe-area-inset-bottom))]">
       <header className="sticky top-0 z-10 flex items-center gap-3 border-b border-slate-200 bg-white/90 px-4 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))] backdrop-blur dark:border-slate-800 dark:bg-slate-950/90">
@@ -125,6 +128,13 @@ export default function App() {
               <button className="btn-secondary" onClick={() => void sync.syncNow()}>Try again</button>
             )}
           </div>
+        </div>
+      )}
+
+      {sync.packMissing && (
+        <div className="mx-4 mt-3 rounded-lg bg-sky-50 p-3 text-sm text-sky-900 dark:bg-sky-950 dark:text-sky-100">
+          Photos added by whoever shared this list can't show yet. Open the list again and also tick <b>stock-list-photos.json</b>.
+          {pickerAvailable() && <div className="mt-2"><button className="btn-secondary" onClick={() => void sync.openShared()}>Open shared list again</button></div>}
         </div>
       )}
 
@@ -298,6 +308,8 @@ function ItemEditor({
       const blob = await compressImage(file);
       const id = newId();
       await savePhoto(id, blob, false);
+      // The small copy that goes in the shared photo pack.
+      void ensureThumb(id).catch(() => {});
       unsaved.current.push(id);
       setDraft((d) => ({ ...d, photoId: id }));
       nameRef.current?.focus();
@@ -479,6 +491,7 @@ function Settings({ sync, localOnly, state, onClose, onSignIn, onClearDevice }: 
           </>
         )}
       </section>
+      {signedIn && pickerAvailable() && <SharingSection sync={sync} />}
       <section className="mt-6 space-y-2 text-sm">
         <h3 className="font-semibold">Data</h3>
         <button onClick={exportCsv} className="btn-secondary w-full" disabled={state.items.length === 0}>Download stock as CSV</button>
@@ -489,11 +502,72 @@ function Settings({ sync, localOnly, state, onClose, onSignIn, onClearDevice }: 
   );
 }
 
+function SharingSection({ sync }: { sync: ReturnType<typeof useSync> }) {
+  const [email, setEmail] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  async function share() {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      setMessage('Enter their Google email address.');
+      return;
+    }
+    setBusy(true);
+    setMessage(null);
+    try {
+      await sync.share(email);
+      setMessage(`Shared with ${email.trim()}. Google emails them a link; they open Stock List, sign in, tap “Open a list shared with me” and tick both files.`);
+      setEmail('');
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <section className="mt-6 space-y-2 text-sm">
+      <h3 className="font-semibold">Sharing</h3>
+      {sync.isOwner ? (
+        <>
+          <p className="text-slate-500">Let someone else see and edit this list with their own Google account.</p>
+          <div className="flex gap-2">
+            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="their.name@gmail.com" className="input min-w-0 flex-1" autoComplete="off" />
+            <button onClick={() => void share()} disabled={busy || !email.trim()} className="btn-primary shrink-0">{busy ? 'Sharing…' : 'Share'}</button>
+          </div>
+          <p className="text-xs text-slate-500">To stop sharing, remove them from the Stock List folder in Google Drive (Share → their name → Remove access).</p>
+        </>
+      ) : (
+        <p className="text-slate-500">This list was shared with you.</p>
+      )}
+      <button onClick={() => void sync.openShared()} className="btn-secondary w-full">Open a list shared with me</button>
+      {message && <p className="text-slate-600 dark:text-slate-300">{message}</p>}
+    </section>
+  );
+}
+
+function ChooseList({ email, error, onNew, onShared, onSignOut }: { email: string | null; error: string | null; onNew: () => void; onShared: () => void; onSignOut: () => void }) {
+  return (
+    <div className="mx-auto flex min-h-dvh max-w-md flex-col justify-center gap-4 p-6">
+      <h1 className="text-2xl font-bold tracking-tight">No list in this Google account yet</h1>
+      <p className="text-slate-600 dark:text-slate-300">Signed in as <b>{email ?? 'your Google account'}</b>.</p>
+      {error && <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-100">{error}</p>}
+      <button onClick={onNew} className="btn-primary w-full">Start a new list</button>
+      {pickerAvailable() && (
+        <>
+          <button onClick={onShared} className="btn-secondary w-full">Open a list shared with me</button>
+          <p className="text-sm text-slate-500">Someone shared their list? Tap above, then tick <b>both</b> Stock List files (stock-list-data.json and stock-list-photos.json) and press Select.</p>
+        </>
+      )}
+      <button onClick={onSignOut} className="text-sm text-slate-500 underline">Use a different Google account</button>
+    </div>
+  );
+}
+
 // --- Small pieces ----------------------------------------------------------
 
 function SyncPill({ status, pending, onClick }: { status: SyncStatus; pending: number; onClick: () => void }) {
   const map: Record<SyncStatus, [string, string]> = {
     unconfigured: ['On this device', 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'],
+    choose: ['Choose a list', 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'],
     off: ['On this device', 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'],
     syncing: ['Syncing…', 'bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-200'],
     synced: [pending ? `${pending} photo${pending > 1 ? 's' : ''} uploading` : 'Saved to Drive', 'bg-teal-100 text-teal-800 dark:bg-teal-950 dark:text-teal-200'],
@@ -535,14 +609,16 @@ function Stepper({ value, onChange, compact }: { value: number; onChange: (n: nu
 
 function Thumb({ photoId, large }: { photoId: string | null; large?: boolean }) {
   const [url, setUrl] = useState<string | null>(null);
+  const [version, setVersion] = useState(0);
+  useEffect(() => (photoId ? onPhotoChanged((id) => id === photoId && setVersion((v) => v + 1)) : undefined), [photoId]);
   useEffect(() => {
     let live = true;
     setUrl(null);
-    if (photoId) void photoUrl(photoId).then((u) => live && setUrl(u));
+    if (photoId) void photoUrl(photoId, large ? 'full' : 'thumb').then((u) => live && setUrl(u));
     return () => {
       live = false;
     };
-  }, [photoId]);
+  }, [photoId, large, version]);
   if (large) return url ? <img src={url} alt="" className="absolute inset-0 size-full object-cover" /> : <span className="text-sm text-slate-400">Loading photo…</span>;
   return (
     <span className="flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-slate-100 text-slate-400 dark:bg-slate-800">
