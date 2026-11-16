@@ -14,8 +14,9 @@ it runs like an app, including offline.
   is. Locations you've used before appear as one-tap chips.
   **Save & add another** keeps the location, so doing a whole shelf is
   quick. Change counts with − / + straight from the
-  list. Search by name, location or notes, or filter by location.
-- **To buy** - type and press Enter to add; tick things off as you buy them;
+  list. Under **More details** (optional): brand / manufacturer, pack type
+  (tin, carton, packet… or your own) and size of one (g, kg, ml, L…). Search by name, location or notes, or filter by location.
+- **Shopping list** (its own tab) - type and press Enter to add; tick things off as you buy them;
   **Clear ticked** removes them. The **Buy** button on a stock item adds it
   to the list (once).
 - **Settings** - who's signed in, last sync, sync now, sign out, download

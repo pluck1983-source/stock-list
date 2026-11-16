@@ -3,7 +3,11 @@ import {
   clearLocal,
   emptyState,
   loadLocal,
+  itemDetails,
   locationsByUse,
+  PACK_TYPES,
+  UNITS,
+  valuesByUse,
   matchesSearch,
   newId,
   now,
@@ -109,7 +113,7 @@ export default function App() {
   return (
     <div className="mx-auto flex min-h-dvh max-w-2xl flex-col pb-[calc(5rem+env(safe-area-inset-bottom))]">
       <header className="sticky top-0 z-10 flex items-center gap-3 border-b border-slate-200 bg-white/90 px-4 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))] backdrop-blur dark:border-slate-800 dark:bg-slate-950/90">
-        <h1 className="flex-1 text-xl font-bold tracking-tight">{tab === 'stock' ? 'Stock' : 'To buy'}</h1>
+        <h1 className="min-w-0 flex-1 truncate text-xl font-bold tracking-tight">{tab === 'stock' ? 'Stock' : 'Shopping list'}</h1>
         <SyncPill status={sync.status} onClick={() => setShowSettings(true)} />
         <button onClick={() => setShowSettings(true)} aria-label="Settings" className="rounded-full p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" /></svg>
@@ -133,14 +137,14 @@ export default function App() {
         {tab === 'stock' ? (
           <StockTab state={state} onAdd={() => setEditing('new')} onEdit={setEditing} onQty={setQty} onBuy={(i) => { addToBuy(i.name, i.id); setToast(`Added “${i.name}” to the shopping list`); }} />
         ) : (
-          <BuyTab buy={state.buy} onAdd={(n) => addToBuy(n)} onToggle={toggleBuy} onRemove={removeBuy} />
+          <BuyTab buy={state.buy} items={state.items} onAdd={(n) => addToBuy(n)} onToggle={toggleBuy} onRemove={removeBuy} />
         )}
       </main>
 
       <nav className="fixed inset-x-0 bottom-0 z-10 border-t border-slate-200 bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur dark:border-slate-800 dark:bg-slate-950/95">
         <div className="mx-auto flex max-w-2xl">
           <TabButton active={tab === 'stock'} onClick={() => setTab('stock')} label="Stock" count={state.items.length} />
-          <TabButton active={tab === 'buy'} onClick={() => setTab('buy')} label="To buy" count={openBuyCount} highlight={openBuyCount > 0} />
+          <TabButton active={tab === 'buy'} onClick={() => setTab('buy')} label="Shopping list" count={openBuyCount} highlight={openBuyCount > 0} />
         </div>
       </nav>
 
@@ -148,6 +152,8 @@ export default function App() {
         <ItemEditor
           item={editing === 'new' ? null : editing}
           locations={locationsByUse(state.items)}
+          brands={valuesByUse(state.items.map((i) => i.brand))}
+          packTypes={[...PACK_TYPES, ...valuesByUse(state.items.map((i) => i.packType)).filter((t) => !PACK_TYPES.some((p) => p.toLowerCase() === t.toLowerCase()))]}
           onClose={() => setEditing(null)}
           onSave={(item) => {
             upsertItem(item);
@@ -237,6 +243,7 @@ function StockTab({ state, onAdd, onEdit, onQty, onBuy }: { state: StockState; o
                 <button onClick={() => onEdit(item)} className="block w-full text-left">
                   <span className="line-clamp-2 font-medium leading-snug">{item.name}</span>
                   <span className="block truncate text-sm text-slate-500">{item.location || 'No location'}</span>
+                  {itemDetails(item) && <span className="block truncate text-xs text-slate-500">{itemDetails(item)}</span>}
                 </button>
                 <div className="mt-1 flex items-center justify-end gap-2">
                   <button
@@ -266,6 +273,8 @@ function StockTab({ state, onAdd, onEdit, onQty, onBuy }: { state: StockState; o
 function ItemEditor({
   item,
   locations,
+  brands,
+  packTypes,
   onClose,
   onSave,
   onDelete,
@@ -273,12 +282,24 @@ function ItemEditor({
 }: {
   item: StockItem | null;
   locations: string[];
+  brands: string[];
+  packTypes: string[];
   onClose: () => void;
   onSave: (item: StockItem) => void;
   onDelete: (item: StockItem) => void;
   onBuy: (item: StockItem) => void;
 }) {
-  const [draft, setDraft] = useState(() => ({ name: item?.name ?? '', qty: item?.qty ?? 1, location: item?.location ?? locations[0] ?? '', notes: item?.notes ?? '' }));
+  const [draft, setDraft] = useState(() => ({
+    name: item?.name ?? '',
+    qty: item?.qty ?? 1,
+    location: item?.location ?? locations[0] ?? '',
+    notes: item?.notes ?? '',
+    brand: item?.brand ?? '',
+    packType: item?.packType ?? '',
+    size: item?.size != null ? String(item.size) : '',
+    unit: item?.unit ?? 'g',
+  }));
+  const [moreOpen, setMoreOpen] = useState(() => Boolean(item && itemDetails(item)));
   const nameRef = useRef<HTMLInputElement>(null);
   function save(another: boolean) {
     if (!draft.name.trim()) {
@@ -292,13 +313,17 @@ function ItemEditor({
       qty: Math.max(0, Math.round(draft.qty)),
       location: draft.location.trim(),
       notes: draft.notes.trim(),
+      brand: draft.brand.trim(),
+      packType: draft.packType.trim(),
+      size: parseSize(draft.size),
+      unit: draft.unit,
       createdAt: item?.createdAt ?? at,
       updatedAt: at,
     };
     onSave(saved);
     if (another) {
       // Keep the location: boxing up a shelf is the same place over and over.
-      setDraft((d) => ({ name: '', qty: 1, location: d.location, notes: '' }));
+      setDraft((d) => ({ name: '', qty: 1, location: d.location, notes: '', brand: '', packType: '', size: '', unit: d.unit }));
       nameRef.current?.focus();
     } else onClose();
   }
@@ -324,6 +349,40 @@ function ItemEditor({
         </div>
       )}
 
+      <button type="button" onClick={() => setMoreOpen((o) => !o)} aria-expanded={moreOpen} className="mt-4 flex w-full items-center justify-between rounded-lg py-2 text-sm font-semibold text-teal-700 dark:text-teal-300">
+        <span>More details <span className="font-normal text-slate-400">(brand, pack, size)</span></span>
+        <span aria-hidden>{moreOpen ? '−' : '+'}</span>
+      </button>
+      {moreOpen && (
+        <div className="space-y-3 rounded-xl bg-slate-50 p-3 dark:bg-slate-900">
+          <div>
+            <label className="label">Brand / manufacturer</label>
+            <input value={draft.brand} onChange={(e) => setDraft({ ...draft, brand: e.target.value })} placeholder="e.g. Heinz" className="input w-full" list="stock-brands" autoCapitalize="words" />
+            <datalist id="stock-brands">{brands.map((b) => <option key={b} value={b} />)}</datalist>
+          </div>
+          <div>
+            <label className="label">Pack type</label>
+            <div className="flex flex-wrap gap-2">
+              {packTypes.map((t) => {
+                const active = draft.packType.trim().toLowerCase() === t.toLowerCase();
+                return <Chip key={t} active={active} onClick={() => setDraft({ ...draft, packType: active ? '' : t })}>{t}</Chip>;
+              })}
+            </div>
+            <input value={packTypes.some((t) => t.toLowerCase() === draft.packType.trim().toLowerCase()) ? '' : draft.packType} onChange={(e) => setDraft({ ...draft, packType: e.target.value })} placeholder="Or type another…" className="input mt-2 w-full" />
+          </div>
+          <div>
+            <label className="label">Size of one</label>
+            <div className="flex gap-2">
+              <input value={draft.size} onChange={(e) => setDraft({ ...draft, size: e.target.value })} inputMode="decimal" placeholder="e.g. 400" className="input min-w-0 flex-1" aria-label="Size" />
+              <select value={draft.unit} onChange={(e) => setDraft({ ...draft, unit: e.target.value })} className="input w-24" aria-label="Unit">
+                {UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
+              </select>
+            </div>
+            {draft.size.trim() !== '' && parseSize(draft.size) === null && <p className="mt-1 text-sm text-red-600">Enter a number, e.g. 400 or 1.5</p>}
+          </div>
+        </div>
+      )}
+
       <label className="label mt-4">Notes <span className="font-normal text-slate-400">(optional)</span></label>
       <textarea value={draft.notes} onChange={(e) => setDraft({ ...draft, notes: e.target.value })} rows={2} className="input w-full" />
 
@@ -341,9 +400,17 @@ function ItemEditor({
   );
 }
 
+/** "400", "1.5" or "1,5" → a positive number; anything else → null */
+function parseSize(text: string): number | null {
+  const n = Number(text.trim().replace(',', '.'));
+  return text.trim() !== '' && Number.isFinite(n) && n > 0 ? n : null;
+}
+
 // --- Shopping list -------------------------------------------------------------
 
-function BuyTab({ buy, onAdd, onToggle, onRemove }: { buy: BuyItem[]; onAdd: (name: string) => void; onToggle: (id: string) => void; onRemove: (ids: string[]) => void }) {
+function BuyTab({ buy, items, onAdd, onToggle, onRemove }: { buy: BuyItem[]; items: StockItem[]; onAdd: (name: string) => void; onToggle: (id: string) => void; onRemove: (ids: string[]) => void }) {
+  // Brand, pack and size of items added from Stock - what to look for in the shop.
+  const details = new Map(items.map((i) => [i.id, itemDetails(i)]));
   const [text, setText] = useState('');
   const sorted = sortBuyList(buy);
   const done = buy.filter((b) => b.done);
@@ -368,7 +435,10 @@ function BuyTab({ buy, onAdd, onToggle, onRemove }: { buy: BuyItem[]; onAdd: (na
             <li key={b.id} className="flex items-center gap-3 px-3">
               <label className="flex flex-1 cursor-pointer items-center gap-3 py-3">
                 <input type="checkbox" checked={b.done} onChange={() => onToggle(b.id)} className="size-6 accent-teal-600" />
-                <span className={b.done ? 'text-slate-400 line-through' : ''}>{b.name}</span>
+                <span className="min-w-0">
+                  <span className={`block ${b.done ? 'text-slate-400 line-through' : ''}`}>{b.name}</span>
+                  {b.stockId && details.get(b.stockId) && <span className="block text-xs text-slate-500">{details.get(b.stockId)}</span>}
+                </span>
               </label>
               <button onClick={() => onRemove([b.id])} aria-label={`Remove ${b.name}`} className="p-2 text-slate-400 hover:text-red-600">✕</button>
             </li>
@@ -507,21 +577,21 @@ function ChooseList({ email, error, onNew, onShared, onSignOut }: { email: strin
 
 function SyncPill({ status, onClick }: { status: SyncStatus; onClick: () => void }) {
   const map: Record<SyncStatus, [string, string]> = {
-    unconfigured: ['On this device', 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'],
-    choose: ['Choose a list', 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'],
-    off: ['On this device', 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'],
+    unconfigured: ['Device only', 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'],
+    choose: ['Choose list', 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'],
+    off: ['Device only', 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'],
     syncing: ['Syncing…', 'bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-200'],
-    synced: ['Saved to Drive', 'bg-teal-100 text-teal-800 dark:bg-teal-950 dark:text-teal-200'],
+    synced: ['Saved', 'bg-teal-100 text-teal-800 dark:bg-teal-950 dark:text-teal-200'],
     reconnect: ['Reconnect', 'bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200'],
     error: ['Sync problem', 'bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-200'],
   };
   const [label, cls] = map[status];
-  return <button onClick={onClick} className={`rounded-full px-3 py-1 text-xs font-medium ${cls}`}>{label}</button>;
+  return <button onClick={onClick} className={`shrink-0 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-medium ${cls}`}>{label}</button>;
 }
 
 function TabButton({ active, onClick, label, count, highlight }: { active: boolean; onClick: () => void; label: string; count: number; highlight?: boolean }) {
   return (
-    <button onClick={onClick} className={`flex flex-1 items-center justify-center gap-2 py-4 text-sm font-semibold ${active ? 'text-teal-700 dark:text-teal-300' : 'text-slate-500'}`}>
+    <button onClick={onClick} aria-current={active ? 'page' : undefined} className={`-mt-px flex flex-1 items-center justify-center gap-2 border-t-[3px] py-4 text-sm font-semibold ${active ? 'border-teal-600 bg-teal-50 text-teal-700 dark:bg-teal-950 dark:text-teal-300' : 'border-transparent text-slate-500'}`}>
       {label}
       <span className={`rounded-full px-2 py-0.5 text-xs ${highlight ? 'bg-teal-600 text-white' : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'}`}>{count}</span>
     </button>

@@ -11,8 +11,24 @@ export interface StockItem {
   qty: number;
   location: string;
   notes: string;
+  /** Optional details - empty / null when not filled in */
+  brand: string;
+  /** Tin, carton, packet… (see PACK_TYPES), or anything typed */
+  packType: string;
+  /** Size of one, e.g. 400 with unit 'g' */
+  size: number | null;
+  unit: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export const PACK_TYPES = ['Tin', 'Carton', 'Packet', 'Bottle', 'Jar', 'Box', 'Bag', 'Tube', 'Tub', 'Pouch', 'Roll'];
+export const UNITS = ['g', 'kg', 'ml', 'L', 'cl', 'oz', 'lb', 'each'];
+
+/** "Heinz · Tin · 400 g" - the details that are filled in, in that order */
+export function itemDetails(item: Pick<StockItem, 'brand' | 'packType' | 'size' | 'unit'>): string {
+  const size = item.size !== null && item.size > 0 ? `${Number(item.size.toFixed(3))}${item.unit === 'each' ? ' each' : ` ${item.unit}`}` : '';
+  return [item.brand.trim(), item.packType.trim(), size].filter(Boolean).join(' · ');
 }
 
 export interface BuyItem {
@@ -51,6 +67,10 @@ export function parseState(text: string): StockState {
       qty: Number.isFinite(i.qty) ? i.qty : 0,
       location: i.location ?? '',
       notes: i.notes ?? '',
+      brand: i.brand ?? '',
+      packType: i.packType ?? '',
+      size: typeof i.size === 'number' && Number.isFinite(i.size) ? i.size : null,
+      unit: i.unit || 'g',
     })),
     buy: (raw.buy ?? []).map((b) => ({ ...b, done: Boolean(b.done), stockId: b.stockId ?? null })),
     tombstones: raw.tombstones ?? {},
@@ -66,6 +86,19 @@ export function mergeStock(local: StockState, remote: StockState): StockState {
     buy: mergeList(local.buy, remote.buy, tombstones),
     tombstones,
   };
+}
+
+/** Values already used for a text field (brand…), most-used first, ignoring case and blanks. */
+export function valuesByUse(values: string[]): string[] {
+  const counts = new Map<string, { label: string; n: number }>();
+  for (const value of values) {
+    const label = value.trim();
+    if (!label) continue;
+    const entry = counts.get(label.toLowerCase());
+    if (entry) entry.n++;
+    else counts.set(label.toLowerCase(), { label, n: 1 });
+  }
+  return [...counts.values()].sort((a, b) => b.n - a.n || a.label.localeCompare(b.label)).map((e) => e.label);
 }
 
 /** Locations in use, most-used first, for quick picking. */
@@ -84,7 +117,7 @@ export function locationsByUse(items: StockItem[]): string[] {
 
 /** Matches name, location or notes; every word typed must appear somewhere. */
 export function matchesSearch(item: StockItem, query: string): boolean {
-  const haystack = `${item.name} ${item.location} ${item.notes}`.toLowerCase();
+  const haystack = `${item.name} ${item.location} ${item.notes} ${item.brand} ${item.packType}`.toLowerCase();
   return query
     .toLowerCase()
     .split(/\s+/)
@@ -103,7 +136,10 @@ function csvCell(value: string | number): string {
 }
 
 export function stockCsv(items: StockItem[]): string {
-  const rows = [['Name', 'Quantity', 'Location', 'Notes', 'Updated'], ...items.map((i) => [i.name, i.qty, i.location, i.notes, i.updatedAt.slice(0, 10)])];
+  const rows = [
+    ['Name', 'Quantity', 'Location', 'Brand', 'Pack type', 'Size', 'Unit', 'Notes', 'Updated'],
+    ...items.map((i) => [i.name, i.qty, i.location, i.brand, i.packType, i.size ?? '', i.size === null ? '' : i.unit, i.notes, i.updatedAt.slice(0, 10)]),
+  ];
   return rows.map((r) => r.map(csvCell).join(',')).join('\n');
 }
 

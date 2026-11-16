@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { decideSync, hashState } from './syncEngine';
-import { emptyState, locationsByUse, matchesSearch, mergeStock, parseState, sortBuyList, stockCsv, type BuyItem, type StockItem, type StockState } from './store';
+import { emptyState, itemDetails, valuesByUse, locationsByUse, matchesSearch, mergeStock, parseState, sortBuyList, stockCsv, type BuyItem, type StockItem, type StockState } from './store';
 
 const item = (id: string, updatedAt: string, patch: Partial<StockItem> = {}): StockItem => ({
-  id, name: id, qty: 1, location: '', notes: '', createdAt: '2026-01-01', updatedAt, ...patch,
+  id, name: id, qty: 1, location: '', notes: '', brand: '', packType: '', size: null, unit: 'g', createdAt: '2026-01-01', updatedAt, ...patch,
 });
 const buy = (id: string, createdAt: string, done = false): BuyItem => ({ id, name: id, done, stockId: null, createdAt, updatedAt: createdAt });
 const withItems = (items: StockItem[], extra: Partial<StockState> = {}): StockState => ({ ...emptyState(), items, ...extra });
@@ -39,7 +39,7 @@ describe('mergeStock', () => {
 describe('parseState', () => {
   it('fills in missing fields', () => {
     const s = parseState(JSON.stringify({ items: [{ id: 'a', name: 'x', createdAt: '1', updatedAt: '1' }] }));
-    expect(s.items[0]).toMatchObject({ qty: 0, location: '', notes: '' });
+    expect(s.items[0]).toMatchObject({ qty: 0, location: '', notes: '', brand: '', packType: '', size: null, unit: 'g' });
     expect(s.buy).toEqual([]);
   });
 });
@@ -61,7 +61,8 @@ describe('helpers', () => {
   });
 
   it('quotes CSV cells that need it', () => {
-    expect(stockCsv([item('a', '2026-03-04', { name: 'Nails, 40mm', notes: 'say "hi"' })]).split('\n')[1]).toBe('"Nails, 40mm",1,,"say ""hi""",2026-03-04');
+    expect(stockCsv([item('a', '2026-03-04', { name: 'Nails, 40mm', notes: 'say "hi"' })]).split('\n')[1]).toBe('"Nails, 40mm",1,,,,,,"say ""hi""",2026-03-04');
+    expect(stockCsv([item('b', '2026-03-04', { brand: 'Heinz', packType: 'Tin', size: 400 })]).split('\n')[1]).toBe('b,1,,Heinz,Tin,400,g,,2026-03-04');
   });
 });
 
@@ -79,4 +80,17 @@ describe('old copies with photos', () => {
     expect(s.items[0]).not.toHaveProperty('photoId');
     expect(s).not.toHaveProperty('deletedPhotoIds');
   });
+});
+
+describe('item details', () => {
+  const base = { brand: '', packType: '', size: null as number | null, unit: 'g' };
+  it('joins only what is filled in', () => {
+    expect(itemDetails({ ...base, brand: 'Heinz', packType: 'Tin', size: 400 })).toBe('Heinz · Tin · 400 g');
+    expect(itemDetails({ ...base, size: 1.5, unit: 'L' })).toBe('1.5 L');
+    expect(itemDetails(base)).toBe('');
+  });
+  it('searches brand and pack type', () => {
+    expect(matchesSearch(item('a', '1', { name: 'Beans', brand: 'Heinz', packType: 'Tin' }), 'heinz tin')).toBe(true);
+  });
+  it('lists used values by use', () => expect(valuesByUse(['Heinz', 'heinz ', 'Napolina', ''])).toEqual(['Heinz', 'Napolina']));
 });
