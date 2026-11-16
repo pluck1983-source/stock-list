@@ -42,7 +42,7 @@ it runs like an app, including offline.
    workflow also tries to turn this on). Every push to `main` deploys to
    `https://<your-user>.github.io/<repo-name>/`.
 2. **Google Cloud** ([console.cloud.google.com](https://console.cloud.google.com)),
-   on the OAuth client whose ID is in `.env`:
+   in the Stock List project, on its OAuth web client (its client ID goes in `.env`):
    - **Clients** → the web client → *Authorized redirect URIs*: add the
      app's address exactly, with the trailing slash, e.g.
      `https://pluck1983-source.github.io/stock-list/`.
@@ -50,9 +50,6 @@ it runs like an app, including offline.
    - **Audience → Test users**: the Gmail of everyone who'll sign in.
    - **APIs & Services → Library**: Google Drive API enabled.
 
-   To use a brand-new Google Cloud project instead (so the consent screen
-   says "Stock List"), do the above in that project and put its client ID
-   in `.env` as `VITE_GOOGLE_CLIENT_ID`.
 
 Expect "Google hasn't verified this app" on sign-in (*Advanced → Go to …*):
 full Drive access is a restricted scope, and verification is only needed to
