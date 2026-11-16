@@ -10,7 +10,6 @@ export interface StockItem {
   name: string;
   qty: number;
   location: string;
-  photoId: string | null;
   notes: string;
   createdAt: string;
   updatedAt: string;
@@ -32,11 +31,9 @@ export interface StockState {
   buy: BuyItem[];
   /** id → when it was deleted, so a merge doesn't bring it back */
   tombstones: Record<string, string>;
-  /** Photos replaced or removed, to bin from Drive */
-  deletedPhotoIds: string[];
 }
 
-export const emptyState = (): StockState => ({ version: 1, items: [], buy: [], tombstones: {}, deletedPhotoIds: [] });
+export const emptyState = (): StockState => ({ version: 1, items: [], buy: [], tombstones: {} });
 
 export const now = () => new Date().toISOString();
 
@@ -44,20 +41,19 @@ export const newId = () => crypto.randomUUID();
 
 /** Parses a saved or synced copy, filling anything missing so older/odd files still load. */
 export function parseState(text: string): StockState {
+  // Older copies had photos (photoId, deletedPhotoIds); those fields are dropped.
   const raw = JSON.parse(text) as Partial<StockState>;
   if (!raw || typeof raw !== 'object') throw new Error('Not a Stock List data file');
   return {
     version: 1,
-    items: (raw.items ?? []).map((i) => ({
+    items: (raw.items ?? []).map(({ photoId: _photo, ...i }: StockItem & { photoId?: unknown }) => ({
       ...i,
       qty: Number.isFinite(i.qty) ? i.qty : 0,
       location: i.location ?? '',
       notes: i.notes ?? '',
-      photoId: i.photoId ?? null,
     })),
     buy: (raw.buy ?? []).map((b) => ({ ...b, done: Boolean(b.done), stockId: b.stockId ?? null })),
     tombstones: raw.tombstones ?? {},
-    deletedPhotoIds: raw.deletedPhotoIds ?? [],
   };
 }
 
@@ -69,7 +65,6 @@ export function mergeStock(local: StockState, remote: StockState): StockState {
     items: mergeList(local.items, remote.items, tombstones),
     buy: mergeList(local.buy, remote.buy, tombstones),
     tombstones,
-    deletedPhotoIds: [...new Set([...local.deletedPhotoIds, ...remote.deletedPhotoIds])],
   };
 }
 
@@ -110,18 +105,6 @@ function csvCell(value: string | number): string {
 export function stockCsv(items: StockItem[]): string {
   const rows = [['Name', 'Quantity', 'Location', 'Notes', 'Updated'], ...items.map((i) => [i.name, i.qty, i.location, i.notes, i.updatedAt.slice(0, 10)])];
   return rows.map((r) => r.map(csvCell).join(',')).join('\n');
-}
-
-/** Reads the shared photo pack file: photo id → small JPEG as a data URL. Bad entries are skipped. */
-export function parsePack(text: string): Record<string, string> {
-  try {
-    const raw = JSON.parse(text) as { photos?: Record<string, unknown> };
-    const out: Record<string, string> = {};
-    for (const [id, value] of Object.entries(raw?.photos ?? {})) if (typeof value === 'string' && value.startsWith('data:image/')) out[id] = value;
-    return out;
-  } catch {
-    return {};
-  }
 }
 
 // --- Device copy ------------------------------------------------------------

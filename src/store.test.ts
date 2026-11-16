@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { decideSync, hashState } from './syncEngine';
-import { emptyState, locationsByUse, parsePack, matchesSearch, mergeStock, parseState, sortBuyList, stockCsv, type BuyItem, type StockItem, type StockState } from './store';
+import { emptyState, locationsByUse, matchesSearch, mergeStock, parseState, sortBuyList, stockCsv, type BuyItem, type StockItem, type StockState } from './store';
 
 const item = (id: string, updatedAt: string, patch: Partial<StockItem> = {}): StockItem => ({
-  id, name: id, qty: 1, location: '', photoId: null, notes: '', createdAt: '2026-01-01', updatedAt, ...patch,
+  id, name: id, qty: 1, location: '', notes: '', createdAt: '2026-01-01', updatedAt, ...patch,
 });
 const buy = (id: string, createdAt: string, done = false): BuyItem => ({ id, name: id, done, stockId: null, createdAt, updatedAt: createdAt });
 const withItems = (items: StockItem[], extra: Partial<StockState> = {}): StockState => ({ ...emptyState(), items, ...extra });
@@ -39,7 +39,7 @@ describe('mergeStock', () => {
 describe('parseState', () => {
   it('fills in missing fields', () => {
     const s = parseState(JSON.stringify({ items: [{ id: 'a', name: 'x', createdAt: '1', updatedAt: '1' }] }));
-    expect(s.items[0]).toMatchObject({ qty: 0, location: '', notes: '', photoId: null });
+    expect(s.items[0]).toMatchObject({ qty: 0, location: '', notes: '' });
     expect(s.buy).toEqual([]);
   });
 });
@@ -73,10 +73,10 @@ describe('decideSync', () => {
   it('pushes when there is no cloud copy yet', () => expect(decideSync({ ...base, remoteVersion: null })).toBe('push'));
 });
 
-describe('parsePack', () => {
-  it('keeps image data URLs and skips anything else', () => {
-    const text = JSON.stringify({ version: 1, photos: { a: 'data:image/jpeg;base64,AAA', b: 'http://evil', c: 5 } });
-    expect(parsePack(text)).toEqual({ a: 'data:image/jpeg;base64,AAA' });
+describe('old copies with photos', () => {
+  it('drops photo fields', () => {
+    const s = parseState(JSON.stringify({ items: [{ id: 'a', name: 'x', qty: 1, photoId: 'p1', createdAt: '1', updatedAt: '1' }], deletedPhotoIds: ['p0'] }));
+    expect(s.items[0]).not.toHaveProperty('photoId');
+    expect(s).not.toHaveProperty('deletedPhotoIds');
   });
-  it('treats a broken file as empty', () => expect(parsePack('not json')).toEqual({}));
 });

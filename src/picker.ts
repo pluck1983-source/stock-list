@@ -23,7 +23,6 @@ interface PickedDoc {
 /* Just the parts of Google's picker API used here. */
 interface PickerBuilder {
   addView(view: unknown): PickerBuilder;
-  enableFeature(feature: string): PickerBuilder;
   setOAuthToken(token: string): PickerBuilder;
   setDeveloperKey(key: string): PickerBuilder;
   setAppId(id: string): PickerBuilder;
@@ -43,7 +42,6 @@ interface PickerApi {
   DocsView: new (viewId?: string) => DocsView;
   ViewId: { DOCS: string };
   DocsViewMode: { LIST: string };
-  Feature: { MULTISELECT_ENABLED: string };
   Action: { PICKED: string; CANCEL: string };
 }
 interface GoogleWindow {
@@ -78,11 +76,10 @@ export async function pickSharedFiles(token: string, searchText: string): Promis
     const view = new picker.DocsView(picker.ViewId.DOCS).setMimeTypes('application/json').setOwnedByMe(false).setMode(picker.DocsViewMode.LIST).setQuery(searchText);
     new picker.PickerBuilder()
       .addView(view)
-      .enableFeature(picker.Feature.MULTISELECT_ENABLED)
       .setOAuthToken(token)
       .setDeveloperKey(API_KEY)
       .setAppId(APP_ID)
-      .setTitle('Tick both Stock List files, then Select')
+      .setTitle('Select stock-list-data.json')
       .setCallback((data) => {
         if (data.action === picker.Action.PICKED) resolve(data.docs ?? []);
         else if (data.action === picker.Action.CANCEL) resolve([]);

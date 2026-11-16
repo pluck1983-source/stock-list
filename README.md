@@ -1,7 +1,7 @@
 # Stock List
 
 A phone-first app for keeping track of stuff: **what you've got, how many
-and where it is**, with a photo of each thing, plus a **shopping list**.
+and where it is**, plus a **shopping list**.
 Everything is saved in your own Google Drive. There's no server: the
 browser talks straight to Google.
 
@@ -10,10 +10,10 @@ it runs like an app, including offline.
 
 ## What it does
 
-- **Stock** - tap **+ Add**, take a photo, type what it is, set how many and
-  where it is. Locations you've used before appear as one-tap chips.
-  **Save & add another** keeps the location and opens the camera again, so
-  doing a whole shelf is quick. Change counts with − / + straight from the
+- **Stock** - tap **+ Add**, type what it is, set how many and where it
+  is. Locations you've used before appear as one-tap chips.
+  **Save & add another** keeps the location, so doing a whole shelf is
+  quick. Change counts with − / + straight from the
   list. Search by name, location or notes, or filter by location.
 - **To buy** - type and press Enter to add; tick things off as you buy them;
   **Clear ticked** removes them. The **Buy** button on a stock item adds it
@@ -23,25 +23,20 @@ it runs like an app, including offline.
 
 ## Where the data lives
 
-- A **Stock List** folder in your Google Drive: `stock-list-data.json` plus
-  a `photos` subfolder with one JPEG per item (shrunk to ~1200 px on the
-  phone first).
+- A **Stock List** folder in your Google Drive holding one file,
+  `stock-list-data.json`.
 - Each device keeps its own copy, so it works offline. Edits upload a couple
   of seconds after you stop; opening the app pulls changes from other
   devices. Copies are merged item by item (newest edit wins, deletions
   stick), so two phones can be used at once.
 - **Privacy:** the app asks Google only for `drive.file` - access to the
-  files it created itself, or that you pick in Google's file picker. It
+  file it created itself, or that you pick in Google's file picker. It
   cannot see, change or delete anything else in your Drive.
 - **Sharing with someone else:** Settings → Sharing → enter their Google
   email → **Share**. Google emails them. They open Stock List, sign in, tap
-  **Open a list shared with me**, tick **both** `stock-list-data.json` and
-  `stock-list-photos.json`, and press **Select** (once per Google account).
-  To stop sharing, remove them from the **Stock List** folder in Drive.
-- **Photos when shared:** each person's app can only open the full-size
-  photos it uploaded itself, so a small copy (400 px) of every photo goes in
-  the shared `stock-list-photos.json`. Everyone sees everyone's photos at
-  that size; your own photos stay full size for you.
+  **Open a list shared with me**, select `stock-list-data.json` and press
+  **Select** (once per Google account). To stop sharing, remove them from the
+  **Stock List** folder in Drive.
 - Google sign-ins last an hour; the app renews them by itself when opened.
 - **Use on this device only** skips Google entirely (nothing is backed up).
 

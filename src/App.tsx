@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { clearAllPhotos, compressImage, deleteLocalPhoto, ensureThumb, onPhotoChanged, photoUrl, savePhoto } from './photos';
 import {
   clearLocal,
   emptyState,
@@ -61,7 +60,6 @@ export default function App() {
         ...s,
         items: s.items.filter((i) => i.id !== item.id),
         tombstones: { ...s.tombstones, [item.id]: now() },
-        deletedPhotoIds: item.photoId ? [...s.deletedPhotoIds, item.photoId] : s.deletedPhotoIds,
       })),
     [setState],
   );
@@ -112,7 +110,7 @@ export default function App() {
     <div className="mx-auto flex min-h-dvh max-w-2xl flex-col pb-[calc(5rem+env(safe-area-inset-bottom))]">
       <header className="sticky top-0 z-10 flex items-center gap-3 border-b border-slate-200 bg-white/90 px-4 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))] backdrop-blur dark:border-slate-800 dark:bg-slate-950/90">
         <h1 className="flex-1 text-xl font-bold tracking-tight">{tab === 'stock' ? 'Stock' : 'To buy'}</h1>
-        <SyncPill status={sync.status} pending={sync.pendingPhotos} onClick={() => setShowSettings(true)} />
+        <SyncPill status={sync.status} onClick={() => setShowSettings(true)} />
         <button onClick={() => setShowSettings(true)} aria-label="Settings" className="rounded-full p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" /></svg>
         </button>
@@ -128,13 +126,6 @@ export default function App() {
               <button className="btn-secondary" onClick={() => void sync.syncNow()}>Try again</button>
             )}
           </div>
-        </div>
-      )}
-
-      {sync.packMissing && (
-        <div className="mx-4 mt-3 rounded-lg bg-sky-50 p-3 text-sm text-sky-900 dark:bg-sky-950 dark:text-sky-100">
-          Photos added by whoever shared this list can't show yet. Open the list again and also tick <b>stock-list-photos.json</b>.
-          {pickerAvailable() && <div className="mt-2"><button className="btn-secondary" onClick={() => void sync.openShared()}>Open shared list again</button></div>}
         </div>
       )}
 
@@ -158,9 +149,8 @@ export default function App() {
           item={editing === 'new' ? null : editing}
           locations={locationsByUse(state.items)}
           onClose={() => setEditing(null)}
-          onSave={(item, oldPhotoId) => {
+          onSave={(item) => {
             upsertItem(item);
-            if (oldPhotoId && oldPhotoId !== item.photoId) setState((s) => ({ ...s, deletedPhotoIds: [...s.deletedPhotoIds, oldPhotoId] }));
             setToast(`Saved “${item.name}”`);
           }}
           onDelete={(item) => {
@@ -186,10 +176,9 @@ export default function App() {
             void sync.connect();
           }}
           onClearDevice={async () => {
-            if (!window.confirm('Remove all Stock List data and photos from this device? The copy in Google Drive is kept.')) return;
+            if (!window.confirm('Remove all Stock List data from this device? The copy in Google Drive is kept.')) return;
             await sync.disconnect();
             clearLocal();
-            await clearAllPhotos().catch(() => {});
             localStorage.removeItem(LOCAL_ONLY_KEY);
             setState(() => emptyState());
             setLocalOnly(false);
@@ -237,16 +226,13 @@ function StockTab({ state, onAdd, onEdit, onQty, onBuy }: { state: StockState; o
         </div>
       )}
       {state.items.length === 0 ? (
-        <Empty title="Nothing in stock yet" body="Tap + Add, snap a photo, say how many and where it is." />
+        <Empty title="Nothing in stock yet" body="Tap + Add, say what it is, how many and where it is." />
       ) : shown.length === 0 ? (
         <Empty title="No matches" body="Try a different search or location." />
       ) : (
         <ul className="mt-3 divide-y divide-slate-200 overflow-hidden rounded-xl border border-slate-200 bg-white dark:divide-slate-800 dark:border-slate-800 dark:bg-slate-900">
           {shown.map((item) => (
-            <li key={item.id} className="flex gap-3 p-2.5">
-              <button onClick={() => onEdit(item)} aria-label={`Edit ${item.name}`} className="shrink-0">
-                <Thumb photoId={item.photoId} />
-              </button>
+            <li key={item.id} className="flex gap-3 px-3 py-2.5">
               <div className="min-w-0 flex-1">
                 <button onClick={() => onEdit(item)} className="block w-full text-left">
                   <span className="line-clamp-2 font-medium leading-snug">{item.name}</span>
@@ -288,44 +274,12 @@ function ItemEditor({
   item: StockItem | null;
   locations: string[];
   onClose: () => void;
-  onSave: (item: StockItem, oldPhotoId: string | null) => void;
+  onSave: (item: StockItem) => void;
   onDelete: (item: StockItem) => void;
   onBuy: (item: StockItem) => void;
 }) {
-  const [draft, setDraft] = useState(() => ({ name: item?.name ?? '', qty: item?.qty ?? 1, location: item?.location ?? locations[0] ?? '', notes: item?.notes ?? '', photoId: item?.photoId ?? null }));
-  const [busy, setBusy] = useState(false);
-  const [photoError, setPhotoError] = useState<string | null>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
+  const [draft, setDraft] = useState(() => ({ name: item?.name ?? '', qty: item?.qty ?? 1, location: item?.location ?? locations[0] ?? '', notes: item?.notes ?? '' }));
   const nameRef = useRef<HTMLInputElement>(null);
-  /** Photos taken in this sheet but not kept - removed from the device on close */
-  const unsaved = useRef<string[]>([]);
-
-  async function takePhoto(file: File | undefined) {
-    if (!file) return;
-    setBusy(true);
-    setPhotoError(null);
-    try {
-      const blob = await compressImage(file);
-      const id = newId();
-      await savePhoto(id, blob, false);
-      // The small copy that goes in the shared photo pack.
-      void ensureThumb(id).catch(() => {});
-      unsaved.current.push(id);
-      setDraft((d) => ({ ...d, photoId: id }));
-      nameRef.current?.focus();
-    } catch (e) {
-      setPhotoError(e instanceof Error ? e.message : 'Could not use that photo');
-    } finally {
-      setBusy(false);
-      if (fileRef.current) fileRef.current.value = '';
-    }
-  }
-
-  function discardUnsaved(keep: string | null) {
-    for (const id of unsaved.current) if (id !== keep) void deleteLocalPhoto(id).catch(() => {});
-    unsaved.current = [];
-  }
-
   function save(another: boolean) {
     if (!draft.name.trim()) {
       nameRef.current?.focus();
@@ -338,35 +292,23 @@ function ItemEditor({
       qty: Math.max(0, Math.round(draft.qty)),
       location: draft.location.trim(),
       notes: draft.notes.trim(),
-      photoId: draft.photoId,
       createdAt: item?.createdAt ?? at,
       updatedAt: at,
     };
-    onSave(saved, item?.photoId ?? null);
-    discardUnsaved(saved.photoId);
+    onSave(saved);
     if (another) {
       // Keep the location: boxing up a shelf is the same place over and over.
-      setDraft((d) => ({ name: '', qty: 1, location: d.location, notes: '', photoId: null }));
-      fileRef.current?.click();
+      setDraft((d) => ({ name: '', qty: 1, location: d.location, notes: '' }));
+      nameRef.current?.focus();
     } else onClose();
   }
 
-  function close() {
-    discardUnsaved(null);
-    onClose();
-  }
+  const close = onClose;
 
   return (
     <Sheet title={item ? 'Edit item' : 'Add item'} onClose={close}>
-      <input ref={fileRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => void takePhoto(e.target.files?.[0])} />
-      <button onClick={() => fileRef.current?.click()} disabled={busy} className="relative flex aspect-[4/3] w-full items-center justify-center overflow-hidden rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 text-slate-500 dark:border-slate-700 dark:bg-slate-900">
-        {draft.photoId ? <Thumb photoId={draft.photoId} large /> : <span className="flex flex-col items-center gap-1"><CameraIcon /><span className="text-sm font-medium">{busy ? 'Saving photo…' : 'Tap to take a photo'}</span></span>}
-        {draft.photoId && <span className="absolute bottom-2 right-2 rounded-full bg-black/60 px-3 py-1 text-xs text-white">Retake</span>}
-      </button>
-      {photoError && <p className="mt-1 text-sm text-red-600">{photoError}</p>}
-
-      <label className="label mt-4">What is it?</label>
-      <input ref={nameRef} value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="e.g. Kitchen roll" className="input w-full" enterKeyHint="done" />
+      <label className="label">What is it?</label>
+      <input ref={nameRef} autoFocus={!item} value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="e.g. Kitchen roll" className="input w-full" enterKeyHint="done" />
 
       <label className="label mt-4">How many?</label>
       <Stepper value={draft.qty} onChange={(qty) => setDraft({ ...draft, qty })} />
@@ -476,7 +418,6 @@ function Settings({ sync, localOnly, state, onClose, onSignIn, onClearDevice }: 
             <p>Signed in as <b>{sync.accountEmail ?? '…'}</b></p>
             <p className="text-slate-500">
               {sync.status === 'syncing' ? 'Syncing…' : sync.lastSyncedAt ? `Last synced ${new Date(sync.lastSyncedAt).toLocaleString()}` : 'Not synced yet'}
-              {sync.pendingPhotos > 0 && ` · ${sync.pendingPhotos} photo(s) uploading`}
             </p>
             <p className="text-slate-500">Data is in the <b>Stock List</b> folder in Google Drive. The app can only see files it created there, nothing else in your Drive.</p>
             <div className="flex gap-2">
@@ -515,7 +456,7 @@ function SharingSection({ sync }: { sync: ReturnType<typeof useSync> }) {
     setMessage(null);
     try {
       await sync.share(email);
-      setMessage(`Shared with ${email.trim()}. Google emails them a link; they open Stock List, sign in, tap “Open a list shared with me” and tick both files.`);
+      setMessage(`Shared with ${email.trim()}. Google emails them a link; they open Stock List, sign in, tap “Open a list shared with me” and select stock-list-data.json.`);
       setEmail('');
     } catch (e) {
       setMessage(e instanceof Error ? e.message : String(e));
@@ -554,7 +495,7 @@ function ChooseList({ email, error, onNew, onShared, onSignOut }: { email: strin
       {pickerAvailable() && (
         <>
           <button onClick={onShared} className="btn-secondary w-full">Open a list shared with me</button>
-          <p className="text-sm text-slate-500">Someone shared their list? Tap above, then tick <b>both</b> Stock List files (stock-list-data.json and stock-list-photos.json) and press Select.</p>
+          <p className="text-sm text-slate-500">Someone shared their list? Tap above, select <b>stock-list-data.json</b> and press Select.</p>
         </>
       )}
       <button onClick={onSignOut} className="text-sm text-slate-500 underline">Use a different Google account</button>
@@ -564,13 +505,13 @@ function ChooseList({ email, error, onNew, onShared, onSignOut }: { email: strin
 
 // --- Small pieces ----------------------------------------------------------
 
-function SyncPill({ status, pending, onClick }: { status: SyncStatus; pending: number; onClick: () => void }) {
+function SyncPill({ status, onClick }: { status: SyncStatus; onClick: () => void }) {
   const map: Record<SyncStatus, [string, string]> = {
     unconfigured: ['On this device', 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'],
     choose: ['Choose a list', 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'],
     off: ['On this device', 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'],
     syncing: ['Syncing…', 'bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-200'],
-    synced: [pending ? `${pending} photo${pending > 1 ? 's' : ''} uploading` : 'Saved to Drive', 'bg-teal-100 text-teal-800 dark:bg-teal-950 dark:text-teal-200'],
+    synced: ['Saved to Drive', 'bg-teal-100 text-teal-800 dark:bg-teal-950 dark:text-teal-200'],
     reconnect: ['Reconnect', 'bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200'],
     error: ['Sync problem', 'bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-200'],
   };
@@ -604,26 +545,6 @@ function Stepper({ value, onChange, compact }: { value: number; onChange: (n: nu
       />
       <button type="button" onClick={() => onChange(value + 1)} aria-label="One more" className={`${size} rounded-full bg-slate-100 font-semibold dark:bg-slate-800`}>+</button>
     </div>
-  );
-}
-
-function Thumb({ photoId, large }: { photoId: string | null; large?: boolean }) {
-  const [url, setUrl] = useState<string | null>(null);
-  const [version, setVersion] = useState(0);
-  useEffect(() => (photoId ? onPhotoChanged((id) => id === photoId && setVersion((v) => v + 1)) : undefined), [photoId]);
-  useEffect(() => {
-    let live = true;
-    setUrl(null);
-    if (photoId) void photoUrl(photoId, large ? 'full' : 'thumb').then((u) => live && setUrl(u));
-    return () => {
-      live = false;
-    };
-  }, [photoId, large, version]);
-  if (large) return url ? <img src={url} alt="" className="absolute inset-0 size-full object-cover" /> : <span className="text-sm text-slate-400">Loading photo…</span>;
-  return (
-    <span className="flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-slate-100 text-slate-400 dark:bg-slate-800">
-      {url ? <img src={url} alt="" className="size-full object-cover" /> : <CameraIcon small />}
-    </span>
   );
 }
 
@@ -661,11 +582,6 @@ function Empty({ title, body }: { title: string; body: string }) {
       <p className="mt-1 text-sm text-slate-500">{body}</p>
     </div>
   );
-}
-
-function CameraIcon({ small }: { small?: boolean }) {
-  const s = small ? 22 : 36;
-  return <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z" /><circle cx="12" cy="13" r="3.5" /></svg>;
 }
 
 function CartIcon({ filled }: { filled?: boolean }) {

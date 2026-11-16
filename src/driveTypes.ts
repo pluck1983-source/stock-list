@@ -1,6 +1,6 @@
 /**
  * A cloud storage backend that holds a single JSON file of business data (plus
- * one image file per item photo) in
+ * nothing else) in
  * the user's own account. Implementations only move bytes - deciding when to
  * push, pull or ask about a conflict lives in syncEngine.ts so a provider can
  * be swapped without touching that logic.
@@ -36,11 +36,6 @@ export interface CloudProvider {
   upload(content: string, existing: RemoteFileMeta | null): Promise<RemoteFileMeta>;
   /** The signed-in account's email address, shown in the header */
   getAccountEmail(): Promise<string | null>;
-  /** Photos are stored as separate files next to the data file, named by photo id */
-  uploadPhoto(photoId: string, blob: Blob): Promise<void>;
-  /** Null if the photo isn't in the cloud (e.g. not uploaded yet from the device that took it) */
-  downloadPhoto(photoId: string): Promise<Blob | null>;
-  deletePhoto(photoId: string): Promise<void>;
   /** True if a usable sign-in exists right now without any redirect */
   hasToken(): boolean;
   /**

@@ -5,8 +5,8 @@ import { AuthRequiredError, type CloudProvider, type RemoteFileMeta } from './dr
  * full-page redirect to Google and back - no server, no popup, so it works
  * on an iPhone home-screen app).
  *
- * Data lives in an ordinary, visible "Stock List" folder: one JSON file
- * plus a "photos" subfolder with one JPEG per item photo. Whoever keeps the list
+ * Data lives in an ordinary, visible "Stock List" folder: one JSON file.
+ * Whoever keeps the list
  * signs in first, which creates the folder in their Drive. Other devices
  * signed in to the same Google account find the file by name.
  *
@@ -23,8 +23,6 @@ export interface DriveConfig {
   appName: string;
   /** The data file, found by this name in My Drive and anything shared */
   fileName: string;
-  /** The shared photo pack: small copies of every photo, so everyone the list is shared with sees them */
-  packName: string;
   /** Folder made on first upload */
   folderName: string;
   /** Prefix for this app's localStorage/sessionStorage keys */
@@ -46,23 +44,17 @@ interface DriveFile {
   owners?: { emailAddress?: string; displayName?: string }[];
 }
 
-/** Drive operations beyond the main data file: the shared photo pack, sharing, and the picker's token. */
+/** Drive operations beyond the main data file: sharing, and the picker's token. */
 export interface DriveExtras {
   /** The current access token, for Google's file picker; null when signed out or expired */
   accessToken(): string | null;
-  /** Metadata of the photo pack file this account can see, or null */
-  getPackMeta(): Promise<RemoteFileMeta | null>;
-  downloadText(meta: RemoteFileMeta): Promise<string>;
-  /** Creates the pack next to the data file, or overwrites the existing one */
-  uploadPack(content: string, existing: RemoteFileMeta | null): Promise<RemoteFileMeta>;
-  /** Gives another Google account edit access to the list's folder, data file and photo pack */
+  /** Gives another Google account edit access to the list's folder and data file */
   shareWith(email: string): Promise<void>;
 }
 
 export function createGoogleDriveProvider(config: DriveConfig): { provider: CloudProvider; extras: DriveExtras; takeSignInError: () => string | null } {
   const SCOPE = 'openid email https://www.googleapis.com/auth/drive.file';
   const { fileName: FILE_NAME, folderName: FOLDER_NAME, appName: APP_NAME } = config;
-  const PHOTOS_FOLDER_NAME = 'photos';
   const FOLDER_MIME = 'application/vnd.google-apps.folder';
   const TOKEN_KEY = `${config.keyPrefix}-token`;
   /** CSRF check for the sign-in round trip */
@@ -233,45 +225,10 @@ export function createGoogleDriveProvider(config: DriveConfig): { provider: Clou
 
   /** Folder holding the data file - learned from the data file, or created on first upload */
   let dataFolderId: string | null = null;
-  let photosFolderId: string | null = null;
 
   async function ensureDataFolder(): Promise<string> {
     dataFolderId ??= await createFolder(FOLDER_NAME, null);
     return dataFolderId;
-  }
-
-  async function ensurePhotosFolder(): Promise<string> {
-    if (photosFolderId) return photosFolderId;
-    try {
-      const parent = dataFolderId ?? (await ensureDataFolder());
-      const existing = await listFiles(`name = ${q(PHOTOS_FOLDER_NAME)} and mimeType = ${q(FOLDER_MIME)} and ${q(parent)} in parents`, 'id');
-      photosFolderId = existing[0]?.id ?? (await createFolder(PHOTOS_FOLDER_NAME, parent));
-    } catch (e) {
-      if (e instanceof AuthRequiredError) throw e;
-      // Someone the list was shared with can't add files to the owner's folder
-      // with this app's narrow access, so their full-size photos go in a folder
-      // of their own. Everyone still sees everyone's photos through the pack.
-      const own = await listFiles(`name = ${q(`${FOLDER_NAME} photos`)} and mimeType = ${q(FOLDER_MIME)} and 'me' in owners`, 'id');
-      photosFolderId = own[0]?.id ?? (await createFolder(`${FOLDER_NAME} photos`, null));
-    }
-    return photosFolderId;
-  }
-
-  function photoFileName(photoId: string): string {
-    return `photo-${photoId}.jpg`;
-  }
-
-  /** Drive file ids of photos looked up this session, so each is only searched for once */
-  const photoFileIds = new Map<string, string>();
-
-  async function findPhotoFileId(photoId: string): Promise<string | null> {
-    const cached = photoFileIds.get(photoId);
-    if (cached) return cached;
-    // Photo ids are random UUIDs, so the name alone is unique.
-    const files = await listFiles(`name = ${q(photoFileName(photoId))}`, 'id');
-    const id = files[0]?.id ?? null;
-    if (id) photoFileIds.set(photoId, id);
-    return id;
   }
 
   function toMeta(file: DriveFile): RemoteFileMeta {
@@ -325,8 +282,6 @@ export function createGoogleDriveProvider(config: DriveConfig): { provider: Clou
       const stored = readToken();
       writeToken(null);
       dataFolderId = null;
-      photosFolderId = null;
-      photoFileIds.clear();
       if (stored) {
         // Best effort - revokes this app's access so a later sign-in asks again.
         await fetch(`https://oauth2.googleapis.com/revoke?token=${encodeURIComponent(stored.token)}`, {
@@ -341,7 +296,6 @@ export function createGoogleDriveProvider(config: DriveConfig): { provider: Clou
       if (!file) return null;
       if (file.parents?.[0] && file.parents[0] !== dataFolderId) {
         dataFolderId = file.parents[0];
-        photosFolderId = null;
       }
       return toMeta(file);
     },
@@ -378,102 +332,16 @@ export function createGoogleDriveProvider(config: DriveConfig): { provider: Clou
       return body.email ?? null;
     },
 
-    async uploadPhoto(photoId, blob) {
-      // Photo ids are never reused, so an existing file means it's already up.
-      if (await findPhotoFileId(photoId)) return;
-      const folderId = await ensurePhotosFolder();
-      const boundary = `stocklist${Date.now()}`;
-      // Receipts can be PDFs or PNG screenshots; the file name stays photo-<id>.jpg so it's found by id.
-      const type = blob.type || 'image/jpeg';
-      const metadata = { name: photoFileName(photoId), parents: [folderId], mimeType: type };
-      const body = new Blob([
-        `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n`,
-        `--${boundary}\r\nContent-Type: ${type}\r\n\r\n`,
-        blob,
-        `\r\n--${boundary}--`,
-      ]);
-      const response = await driveFetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true&fields=id', {
-        method: 'POST',
-        headers: { 'Content-Type': `multipart/related; boundary=${boundary}` },
-        body,
-      });
-      const file = (await response.json()) as { id: string };
-      photoFileIds.set(photoId, file.id);
-    },
-
-    async downloadPhoto(photoId) {
-      const id = await findPhotoFileId(photoId);
-      if (!id) return null;
-      const response = await driveFetch(`https://www.googleapis.com/drive/v3/files/${id}?alt=media&supportsAllDrives=true`);
-      return response.blob();
-    },
-
-    async deletePhoto(photoId) {
-      const id = await findPhotoFileId(photoId);
-      if (!id) return;
-      const stored = readToken();
-      if (!stored) throw new AuthRequiredError();
-      // Trashed rather than deleted: an editor can't permanently delete the
-      // owner's files, and the owner can still recover a photo from the bin.
-      // Not via driveFetch: 403/404 (not allowed / already gone) is fine here.
-      const response = await fetch(`https://www.googleapis.com/drive/v3/files/${id}?supportsAllDrives=true`, {
-        method: 'PATCH',
-        headers: { Authorization: `Bearer ${stored.token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ trashed: true }),
-      });
-      if (response.status === 401) {
-        writeToken(null);
-        throw new AuthRequiredError();
-      }
-      if (!response.ok && response.status !== 403 && response.status !== 404) throw new Error(`Google Drive request failed (${response.status})`);
-      photoFileIds.delete(photoId);
-    },
   };
-
-  async function uploadNamed(name: string, content: string, existing: RemoteFileMeta | null): Promise<RemoteFileMeta> {
-    if (existing) {
-      const response = await driveFetch(
-        `https://www.googleapis.com/upload/drive/v3/files/${existing.id}?uploadType=media&supportsAllDrives=true&fields=${FIELDS}`,
-        { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: content },
-      );
-      return toMeta((await response.json()) as DriveFile);
-    }
-    const folderId = await ensureDataFolder();
-    const boundary = `stocklist${Date.now()}`;
-    const metadata = { name, parents: [folderId], mimeType: 'application/json' };
-    const body =
-      `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n` +
-      `--${boundary}\r\nContent-Type: application/json\r\n\r\n${content}\r\n--${boundary}--`;
-    const response = await driveFetch(`https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true&fields=${FIELDS}`, {
-      method: 'POST',
-      headers: { 'Content-Type': `multipart/related; boundary=${boundary}` },
-      body,
-    });
-    return toMeta((await response.json()) as DriveFile);
-  }
 
   const extras: DriveExtras = {
     accessToken: () => readToken()?.token ?? null,
 
-    async getPackMeta() {
-      const files = await listFiles(`name = ${q(config.packName)}`, FIELDS, 'modifiedTime desc');
-      return files[0] ? toMeta(files[0]) : null;
-    },
-
-    async downloadText(meta) {
-      const response = await driveFetch(`https://www.googleapis.com/drive/v3/files/${meta.id}?alt=media&supportsAllDrives=true`);
-      return response.text();
-    },
-
-    uploadPack: (content, existing) => uploadNamed(config.packName, content, existing),
-
     async shareWith(email) {
       const targets: string[] = [];
       if (dataFolderId) targets.push(dataFolderId);
-      for (const name of [FILE_NAME, config.packName]) {
-        const found = await listFiles(`name = ${q(name)}`, 'id', 'modifiedTime desc');
-        if (found[0]) targets.push(found[0].id);
-      }
+      const found = await listFiles(`name = ${q(FILE_NAME)}`, 'id', 'modifiedTime desc');
+      if (found[0]) targets.push(found[0].id);
       if (targets.length === 0) throw new Error('There is no list in Google Drive to share yet.');
       for (const id of targets) {
         await driveFetch(`https://www.googleapis.com/drive/v3/files/${id}/permissions?supportsAllDrives=true&sendNotificationEmail=true`, {
