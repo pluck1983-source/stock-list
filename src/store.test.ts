@@ -1,11 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { decideSync, hashState } from './syncEngine';
-import { emptyState, itemDetails, valuesByUse, locationsByUse, matchesSearch, mergeStock, parseState, sortBuyList, stockCsv, type BuyItem, type StockItem, type StockState } from './store';
+import { emptyState, itemDetails, valuesByUse, locationsByUse, matchesSearch, mergeStock, parseState, stockCsv, type StockItem, type StockState } from './store';
 
 const item = (id: string, updatedAt: string, patch: Partial<StockItem> = {}): StockItem => ({
   id, name: id, qty: 1, location: '', notes: '', brand: '', packType: '', size: null, unit: 'g', createdAt: '2026-01-01', updatedAt, ...patch,
 });
-const buy = (id: string, createdAt: string, done = false): BuyItem => ({ id, name: id, done, stockId: null, createdAt, updatedAt: createdAt });
 const withItems = (items: StockItem[], extra: Partial<StockState> = {}): StockState => ({ ...emptyState(), items, ...extra });
 
 describe('mergeStock', () => {
@@ -27,11 +26,11 @@ describe('mergeStock', () => {
     expect(mergeStock(stale, deleted).items).toEqual([]);
   });
 
-  it('merges shopping lists and is stable when repeated', () => {
-    const a = { ...emptyState(), buy: [buy('milk', '1')] };
-    const b = { ...emptyState(), buy: [buy('eggs', '2')] };
+  it('is stable when repeated', () => {
+    const a = withItems([item('milk', '1')]);
+    const b = withItems([item('eggs', '2')]);
     const once = mergeStock(a, b);
-    expect(once.buy).toHaveLength(2);
+    expect(once.items).toHaveLength(2);
     expect(hashState(mergeStock(once, b))).toBe(hashState(once));
   });
 });
@@ -40,7 +39,6 @@ describe('parseState', () => {
   it('fills in missing fields', () => {
     const s = parseState(JSON.stringify({ items: [{ id: 'a', name: 'x', createdAt: '1', updatedAt: '1' }] }));
     expect(s.items[0]).toMatchObject({ qty: 0, location: '', notes: '', brand: '', packType: '', size: null, unit: 'g' });
-    expect(s.buy).toEqual([]);
   });
 });
 
@@ -56,9 +54,6 @@ describe('helpers', () => {
     expect(matchesSearch(i, 'paint loft')).toBe(false);
   });
 
-  it('ticked shopping sinks to the bottom', () => {
-    expect(sortBuyList([buy('a', '3', true), buy('b', '1'), buy('c', '2')]).map((b) => b.id)).toEqual(['c', 'b', 'a']);
-  });
 
   it('quotes CSV cells that need it', () => {
     expect(stockCsv([item('a', '2026-03-04', { name: 'Nails, 40mm', notes: 'say "hi"' })]).split('\n')[1]).toBe('"Nails, 40mm",1,,,,,,"say ""hi""",2026-03-04');
@@ -93,4 +88,11 @@ describe('item details', () => {
     expect(matchesSearch(item('a', '1', { name: 'Beans', brand: 'Heinz', packType: 'Tin' }), 'heinz tin')).toBe(true);
   });
   it('lists used values by use', () => expect(valuesByUse(['Heinz', 'heinz ', 'Napolina', ''])).toEqual(['Heinz', 'Napolina']));
+});
+
+describe('old copies with a shopping list', () => {
+  it('drops it', () => {
+    const s = parseState(JSON.stringify({ items: [], buy: [{ id: 'b', name: 'milk', done: false }] }));
+    expect(s).not.toHaveProperty('buy');
+  });
 });

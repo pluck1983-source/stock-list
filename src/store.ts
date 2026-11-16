@@ -2,7 +2,7 @@ import { mergeList, mergeTombstones } from './syncEngine';
 
 /**
  * Stock List: a general inventory (what you have, how many, where it is)
- * plus a shopping list, kept in a Google Drive folder.
+ * kept in a Google Drive folder. (Older copies also had a shopping list; it's dropped.)
  */
 
 export interface StockItem {
@@ -31,25 +31,14 @@ export function itemDetails(item: Pick<StockItem, 'brand' | 'packType' | 'size' 
   return [item.brand.trim(), item.packType.trim(), size].filter(Boolean).join(' · ');
 }
 
-export interface BuyItem {
-  id: string;
-  name: string;
-  done: boolean;
-  /** Set when added from a stock item, so it isn't added twice */
-  stockId: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
-
 export interface StockState {
   version: 1;
   items: StockItem[];
-  buy: BuyItem[];
   /** id → when it was deleted, so a merge doesn't bring it back */
   tombstones: Record<string, string>;
 }
 
-export const emptyState = (): StockState => ({ version: 1, items: [], buy: [], tombstones: {} });
+export const emptyState = (): StockState => ({ version: 1, items: [], tombstones: {} });
 
 export const now = () => new Date().toISOString();
 
@@ -72,7 +61,6 @@ export function parseState(text: string): StockState {
       size: typeof i.size === 'number' && Number.isFinite(i.size) ? i.size : null,
       unit: i.unit || 'g',
     })),
-    buy: (raw.buy ?? []).map((b) => ({ ...b, done: Boolean(b.done), stockId: b.stockId ?? null })),
     tombstones: raw.tombstones ?? {},
   };
 }
@@ -83,7 +71,6 @@ export function mergeStock(local: StockState, remote: StockState): StockState {
   return {
     version: 1,
     items: mergeList(local.items, remote.items, tombstones),
-    buy: mergeList(local.buy, remote.buy, tombstones),
     tombstones,
   };
 }
@@ -123,11 +110,6 @@ export function matchesSearch(item: StockItem, query: string): boolean {
     .split(/\s+/)
     .filter(Boolean)
     .every((word) => haystack.includes(word));
-}
-
-/** Ticked items sink to the bottom; otherwise newest first. */
-export function sortBuyList(buy: BuyItem[]): BuyItem[] {
-  return [...buy].sort((a, b) => Number(a.done) - Number(b.done) || b.createdAt.localeCompare(a.createdAt));
 }
 
 function csvCell(value: string | number): string {

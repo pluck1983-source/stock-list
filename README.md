@@ -1,7 +1,7 @@
 # Stock List
 
 A phone-first app for keeping track of stuff: **what you've got, how many
-and where it is**, plus a **shopping list**.
+and where it is**.
 Everything is saved in your own Google Drive. There's no server: the
 browser talks straight to Google.
 
@@ -16,9 +16,6 @@ it runs like an app, including offline.
   quick. Change counts with − / + straight from the
   list. Under **More details** (optional): brand / manufacturer, pack type
   (tin, carton, packet… or your own) and size of one (g, kg, ml, L…). Search by name, location or notes, or filter by location.
-- **Shopping list** (its own tab) - type and press Enter to add; tick things off as you buy them;
-  **Clear ticked** removes them. The **Buy** button on a stock item adds it
-  to the list (once).
 - **Settings** - who's signed in, last sync, sync now, sign out, download
   the stock as CSV, and "Sign out & clear this device".
 
@@ -26,7 +23,8 @@ it runs like an app, including offline.
 
 - A **Stock List** folder in your Google Drive holding one file,
   `stock-list-data.json`.
-- Each device keeps its own copy, so it works offline. Edits upload a couple
+- Each device keeps its own copy, so it works offline (the top label
+  says **Offline – saved here**). Edits upload a couple
   of seconds after you stop; opening the app pulls changes from other
   devices. Copies are merged item by item (newest edit wins, deletions
   stick), so two phones can be used at once.

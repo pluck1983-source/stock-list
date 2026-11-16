@@ -16,7 +16,7 @@ export default defineConfig({
       manifest: {
         name: 'Stock List',
         short_name: 'Stock List',
-        description: "What you've got, how many and where - plus a shopping list. Saved in Google Drive.",
+        description: "What you've got, how many and where. Saved in Google Drive.",
         start_url: '.',
         scope: '.',
         display: 'standalone',

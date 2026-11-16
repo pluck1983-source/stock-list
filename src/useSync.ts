@@ -19,7 +19,13 @@ const extras = drive.extras;
 export { pickerAvailable };
 
 /** 'choose': signed in, but this account has no list yet - start one or open one shared with it */
-export type SyncStatus = 'unconfigured' | 'off' | 'choose' | 'syncing' | 'synced' | 'reconnect' | 'error';
+/** 'offline': no connection - changes are saved on this device and upload when it's back */
+export type SyncStatus = 'unconfigured' | 'off' | 'choose' | 'syncing' | 'synced' | 'offline' | 'reconnect' | 'error';
+
+/** No connection, as opposed to Google refusing: the browser says so, or the request never got an answer */
+function isOffline(e: unknown): boolean {
+  return !navigator.onLine || (e instanceof TypeError && /fetch|network|load failed|internet/i.test(e.message));
+}
 
 interface SyncMeta {
   syncedHash: string | null;
@@ -128,7 +134,11 @@ export function useSync(state: StockState, setState: (fn: (current: StockState) 
         setError(null);
         setStatus('synced');
       } catch (e) {
-        if (e instanceof AuthRequiredError) {
+        if (isOffline(e)) {
+          // Nothing is lost: the device copy is saved, and the 'online' event syncs it.
+          setError(null);
+          setStatus('offline');
+        } else if (e instanceof AuthRequiredError) {
           if (meta.syncedHash === null) {
             writeMeta(null);
             setStatus('off');
@@ -226,14 +236,19 @@ export function useSync(state: StockState, setState: (fn: (current: StockState) 
       else if (readMeta()) void sync(hiddenAt > 0 && Date.now() - hiddenAt > 10 * 60_000);
     };
     const onOnline = () => readMeta() && void sync();
+    const onOffline = () => {
+      if (readMeta()?.syncedHash != null) setStatus('offline');
+    };
     document.addEventListener('visibilitychange', onVisible);
     window.addEventListener('online', onOnline);
+    window.addEventListener('offline', onOffline);
     const timer = window.setInterval(() => {
       if (document.visibilityState === 'visible' && readMeta() && provider.hasToken()) void sync();
     }, 60_000);
     return () => {
       document.removeEventListener('visibilitychange', onVisible);
       window.removeEventListener('online', onOnline);
+      window.removeEventListener('offline', onOffline);
       window.clearInterval(timer);
     };
   }, [sync]);
