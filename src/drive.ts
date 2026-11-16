@@ -7,14 +7,12 @@ import { AuthRequiredError, type CloudProvider, type RemoteFileMeta } from './dr
  *
  * Data lives in an ordinary, visible "Stock List" folder: one JSON file
  * plus a "photos" subfolder with one JPEG per item photo. Whoever keeps the list
- * signs in first, which creates the folder in their Drive, then shares it
- * (Editor) with anyone else who should use the app. Those people sign in
- * with their own Google accounts and the app finds the shared file by name,
- * so nobody needs anyone else's password and access is removed by unsharing.
+ * signs in first, which creates the folder in their Drive. Other devices
+ * signed in to the same Google account find the file by name.
  *
- * That needs the full "drive" scope - drive.appdata is private to each
- * account, and drive.file can't see a file another person's copy of the app
- * created. In Testing mode only listed test users can sign in at all.
+ * It only asks for drive.file: access to the files this app itself created,
+ * never the rest of the person's Drive. (drive.appdata would hide the
+ * data from the person, so it isn't used.)
  */
 
 const CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
@@ -47,7 +45,7 @@ interface DriveFile {
 }
 
 export function createGoogleDriveProvider(config: DriveConfig): { provider: CloudProvider; takeSignInError: () => string | null } {
-  const SCOPE = 'openid email https://www.googleapis.com/auth/drive';
+  const SCOPE = 'openid email https://www.googleapis.com/auth/drive.file';
   const { fileName: FILE_NAME, folderName: FOLDER_NAME, appName: APP_NAME } = config;
   const PHOTOS_FOLDER_NAME = 'photos';
   const FOLDER_MIME = 'application/vnd.google-apps.folder';
@@ -115,7 +113,7 @@ export function createGoogleDriveProvider(config: DriveConfig): { provider: Clou
       localStorage.setItem(SILENT_FAILED_KEY, '1');
     } else if (error) {
       sessionStorage.setItem(SIGN_IN_ERROR_KEY, error === 'access_denied' ? 'Google sign-in was cancelled or blocked. Check this Google account is added as a test user, then try again.' : `Google sign-in failed (${error}).`);
-    } else if (token && granted && !granted.includes('auth/drive')) {
+    } else if (token && granted && !granted.includes('auth/drive.file')) {
       // Google's consent screen lets people untick Drive access - without it nothing can sync.
       sessionStorage.setItem(SIGN_IN_ERROR_KEY, `Google Drive access was not allowed. Sign in again and tick the box to let ${APP_NAME} see and edit your Google Drive files.`);
     } else if (token) {
@@ -142,7 +140,6 @@ export function createGoogleDriveProvider(config: DriveConfig): { provider: Clou
       response_type: 'token',
       scope: SCOPE,
       state,
-      include_granted_scopes: 'true',
       // "none" bounces straight back if the user is still signed in to Google
       // and has already allowed the app; otherwise it returns an error and we
       // show the Reconnect button instead.

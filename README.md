@@ -30,9 +30,11 @@ it runs like an app, including offline.
   of seconds after you stop; opening the app pulls changes from other
   devices. Copies are merged item by item (newest edit wins, deletions
   stick), so two phones can be used at once.
-- To let someone else use the same list, share the **Stock List** folder
-  with their Gmail as **Editor**. They sign in with their own account and
-  press **Cancel** when asked to start a new folder if it isn't shared yet.
+- **Privacy:** the app asks Google only for `drive.file` - access to the
+  files it created itself. It cannot see, change or delete anything else in
+  your Drive. Any of your devices signed in to the same Google account see
+  the same list. (Sharing the list with *another person's* account doesn't
+  work with this permission.)
 - Google sign-ins last an hour; the app renews them by itself when opened.
 - **Use on this device only** skips Google entirely (nothing is backed up).
 
@@ -46,14 +48,15 @@ it runs like an app, including offline.
    - **Clients** → the web client → *Authorized redirect URIs*: add the
      app's address exactly, with the trailing slash, e.g.
      `https://pluck1983-source.github.io/stock-list/`.
-   - **Data access**: the scope `https://www.googleapis.com/auth/drive`.
+   - **Data access**: the scope `https://www.googleapis.com/auth/drive.file`
+     only (not `.../auth/drive`).
    - **Audience → Test users**: the Gmail of everyone who'll sign in.
    - **APIs & Services → Library**: Google Drive API enabled.
 
 
-Expect "Google hasn't verified this app" on sign-in (*Advanced → Go to …*):
-full Drive access is a restricted scope, and verification is only needed to
-open the app to the public.
+`drive.file` is a non-sensitive scope, so Google doesn't treat the app as
+high-risk. While it's in *Testing*, Google may still show "Google hasn't
+verified this app" (*Advanced → Go to Stock List*).
 
 ## Development
 

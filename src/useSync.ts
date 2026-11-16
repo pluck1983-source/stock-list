@@ -110,15 +110,15 @@ export function useSync(state: StockState, setState: (fn: (current: StockState) 
         const remote = await provider.getMeta();
         if (!remote) {
           if (meta.syncedRemoteVersion !== null)
-            throw new Error("Can't find the Stock List data in Google Drive any more - it may have been unshared or binned. Changes are kept on this device.");
+            throw new Error("Can't find the Stock List data in Google Drive any more - it may have been moved to the bin. Changes are kept on this device.");
           const who = email ?? 'this Google account';
           const ok = window.confirm(
-            `No Stock List data is in ${who}'s Google Drive, or shared with it.\n\nOK - start a new "Stock List" folder in this Drive.\nCancel - someone else keeps the list: ask them to share their Stock List folder with ${who}, then sign in again.`,
+            `No Stock List data was found in ${who}'s Google Drive.\n\nOK - start a new "Stock List" folder there.\nCancel - don't (e.g. you meant to sign in with a different Google account).`,
           );
           if (!ok) {
             writeMeta(null);
             setAccountEmail(null);
-            setError(`Ask whoever keeps the list to share their Stock List folder in Google Drive with ${who} (as Editor), then sign in again.`);
+            setError(`Nothing was created. Sign in again with the Google account that has your Stock List.`);
             setStatus('off');
             return;
           }

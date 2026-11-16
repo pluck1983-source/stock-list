@@ -466,7 +466,7 @@ function Settings({ sync, localOnly, state, onClose, onSignIn, onClearDevice }: 
               {sync.status === 'syncing' ? 'Syncing…' : sync.lastSyncedAt ? `Last synced ${new Date(sync.lastSyncedAt).toLocaleString()}` : 'Not synced yet'}
               {sync.pendingPhotos > 0 && ` · ${sync.pendingPhotos} photo(s) uploading`}
             </p>
-            <p className="text-slate-500">Data is in the <b>Stock List</b> folder in Google Drive. Share that folder (as Editor) with anyone else who should use the list.</p>
+            <p className="text-slate-500">Data is in the <b>Stock List</b> folder in Google Drive. The app can only see files it created there, nothing else in your Drive.</p>
             <div className="flex gap-2">
               <button onClick={() => void sync.syncNow()} className="btn-secondary">Sync now</button>
               <button onClick={() => void sync.disconnect()} className="btn-secondary">Sign out</button>
